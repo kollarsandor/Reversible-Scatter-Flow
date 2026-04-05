@@ -160,6 +160,53 @@ In both cases, reversibility was merely a supplementary technique, a "trick" for
 
 RSF, in contrast, is a pure, independent primitive. It does not contain Attention that it would make reversible, and it does not contain MLP that it would wrap into affine blocks. The affine coupling itself ($W_s$ and $W_t$ weight matrices with the corresponding scatter logic) is responsible for modeling the full complexity. The information is not directed by an external module; rather, the topological flow itself performs the iterative, fluid-dynamics-like distribution within the dimensions. Just as the Transformer in 2017 extracted attention from the RNN context and made it the sole primitive, RSF has extracted affine coupling from the context of Normalizing Flows (NICE, RealNVP) generative models and made it the absolute and sole building block of the network. This reductionist approach clearly justifies the "root-level" status.
 
+
+
+The Question of Diffeomorphisms and Universal Approximation
+
+One of the fundamental theorems of machine learning is the Universal Approximation Theorem, which states that a sufficiently wide Feed-Forward network with a nonlinear activation function is capable of approximating any continuous function on a compact subset of the input space with arbitrary precision. In the case of Transformer models, it has also been proven that they are universal approximators. The question arises: can a network built exclusively from symmetric affine couplings achieve this expressive power? To the lay observer, affine coupling (a scaling and an addition) may seem too "simple" to create complex language models or image recognition systems.
+
+The most advanced research aimed at the theoretical study of Coupling Flow Invertible Neural Networks (CF-INNs) gives an exhaustive answer to this. According to the mathematical proofs, a CF-INN is a universal approximator in the class of invertible functions (diffeomorphisms), provided that its layers contain affine coupling and invertible linear functions as special cases. Since RSF reduces the world precisely to these two operations, its expressive power is equal to that of the most complex classical models within the given problem space.
+
+Moreover, the mathematical proofs also highlight that, unlike stricter volume-preserving flows — which are not capable of perfectly mapping general distributions — RSF, through the scaling factor, is capable of stretching and compressing the probability space (non-volume preserving). The determinant of the Jacobian matrix of RSF takes on an extremely elegant form: since the affine coupling layer follows a triangular matrix structure, the determinant consists exclusively of the product of the scaling factors (the $s$ values) located on the main diagonal:
+$\det(J) = \prod_{j} \exp(s_j)$
+
+This results in RSF being able to fold a smooth, continuous, and distortion-free manifold, until the complex data (for example, the semantic structure of a sentence) takes on a completely linearly interpretable form at the output of the final layer.
+
+Information-Theoretic Aspects and Lossless Transformation
+
+Viewed through the lens of information theory, the RSF architecture radically breaks with traditional theories of information processing. For a long time, the relationship between Claude Shannon's information theory and modern deep learning was defined by Tishby's Information Bottleneck principle. According to this, neural networks learn by continuously destroying, "forgetting" irrelevant noise from the input as it passes through the layers, while trying to preserve the relevant information concerning the output label. From this point of view, traditional networks are lossy compression algorithms. The price of this is that when examining the intermediate layers of the network, the input can no longer be reconstructed, and the system is prone to the phenomenon of "mode collapse," and easily falls victim to adversarial (deceptive) attacks.
+
+By contrast, the invertibility of RSF guarantees the maximum preservation of Mutual Information between the input and the output, as well as between any intermediate layer. Information is never lost, it is only rearranged within an increasingly abstract coordinate system. The process is reversible, which is also significant when examining the thermodynamic aspects of computation (Landauer's principle), since systems that operate without theoretical information loss may be more optimizable from an energetic point of view on future specialized hardware.
+
+In RSF there is no "forgetting" at the structural level. The learning process can instead be understood as an entropy-reduction and representation-separation algorithm, during which the network learns to move data points in an n-dimensional topological space in such a way that they arrive at a position favorable from the point of view of the task, while maintaining perfect traceability back.
+
+
+The Revolution of the Activation Function: The Organic Role of exp(clip(...)) During the development of traditional deep learning models, researchers experimented enormously with different activation functions. After Sigmoid and Tanh, ReLU (Rectified Linear Unit), and then its modified variants (GELU, Swish, SiLU), became dominant. These functions work excellently in classical architectures; however, each of them has a critical flaw in the RSF context: they destroy information. Any input that falls into the range below zero (in the case of ReLU), or reaches the saturation zone, makes the transformation irreversible.
+
+RSF therefore completely banishes classical activation functions from the architecture and integrates nonlinearity into the scaling mechanism itself. During affine coupling, the computed scaling value cannot be negative or zero, since on the one hand that would change the sign of the $x_1$ partition in an uncontrolled way, and on the other hand division by zero in the inverse step would cause collapse. For this reason, the application of the exponential function is a logical choice, since it maps any real input into the strictly positive range.
+
+At the same time, the use of the pure exponential function in deep networks is notorious for its numerical instability. If the output of the linear transformation increases even slightly, the exponential function blows this up into enormous values, which leads to exploding gradients and the model tending to infinity (NaN). This phenomenon was already documented during the development of Masked Autoregressive Flow (MAF) density estimation networks. The genius of the RSF architecture lies in introducing clipping before the exponential function: the expression $\exp(\text{clip}(\dots))$.
+
+Clipping restricts values to a predefined interval, which guarantees that the exponential factor never exceeds a safe maximum that can be processed by hardware (for example, with FP16 or BF16 precision). In machine learning, however, clipping operations raise a serious problem during gradient calculation: outside the clipping boundary, the derivative becomes zero, which leads to the problem of "dead neurons." Once a value exceeds the boundary, the system cannot propagate the error back, because the gradient disappears.
+
+RSF eliminates this problem by rewriting the logic of gradient backpropagation, the backpropagation strategy. In modern probabilistic frameworks and invertible chains (such as those that also appear in TensorFlow Probability bijector implementations), this is solved with a custom Vector-Jacobian Product (VJP) strategy. The essence of the approach is that clipping occurs only for the sake of forward computation and preserving values, but during gradient backpropagation the system ignores the zero gradient resulting from clipping. Expressed in mathematical form:
+
+According to the traditional chain rule, the derivative:
+$\nabla_x [\exp(\text{clip}(x))] = \nabla_x [\text{clip}(x)] \cdot \exp(\text{clip}(x))$
+
+Where the value of $\nabla_x [\text{clip}(x)]$ is zero if $x$ falls outside the clipping boundary.
+
+By contrast, the custom gradient strategy of RSF (following the logic log_scale_clip_gradient = False):
+$\nabla_x [\exp(\text{clip}(x))] = \nabla_x [x] \cdot \exp(\text{clip}(x))$
+
+This procedure maintains the flow of information during backpropagation, regardless of whether clipping occurred in the forward branch, thus the learning process remains robust, and the network does not get stuck in local minima or in "dead spaces" formed because of zero gradients. In this structure, $\exp(\text{clip}(\dots))$ is not merely a replaceable activation function, but an inseparable, organic part of guaranteed invertibility and robust training.
+
+Internal Stability Without Normalization
+
+Another critical question raised by RSF is the complete absence of normalization layers (LayerNorm, BatchNorm). Transformer and ResNet architectures would be practically nonfunctional without normalization. As signals pass through the layers, their statistical variance can grow or shrink uncontrollably, which normalization layers continuously pull back into a unit Gaussian distribution.
+
+RSF, however, does not apply such an external statistical constraint. Since there are no irreversible activations in the network, the signals do not become permanently distorted. In addition, the dynamics of affine coupling ensure automatic balance. The scaling and shifting values are not based on the statistics of the entire batch or channel, but are generated deterministically from the given data point itself (computed from $x_2$, they modify $x_1$). The scaling kept within strict limits ($\exp(\text{clip}(\dots))$) and the additive shift ensure covariance stability even within the deepest networks. RSF stabilizes itself through the topology of the architecture, without requiring heuristic normalization layers.
 Hardware Optimization and the "Day Zero" Problem
 
 A common criticism against new architectures is that in empirical benchmarks they should immediately, from the first day (Day Zero), surpass dominant systems (such as GPT-4 level Transformers), otherwise they cannot be considered a breakthrough. This argument, however, is methodologically severely flawed and conflates theoretical architectural innovation with industrial product development.
