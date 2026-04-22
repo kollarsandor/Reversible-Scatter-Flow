@@ -1061,15 +1061,14 @@ fn backwardOnCore(core: *RSFCore, grad_output: *const Tensor, input: *const Tens
 
     const allocator = scratchAllocator();
 
-    var y = try tensorClone(allocator, input);
-    defer y.deinit();
-    try forwardOnCore(core, &y);
-
     var cur_y1 = try Tensor.init(allocator, &.{ batch_size, core.dim });
     defer cur_y1.deinit();
     var cur_y2 = try Tensor.init(allocator, &.{ batch_size, core.dim });
     defer cur_y2.deinit();
-    _ = try splitInto(core, &y, &cur_y1, &cur_y2);
+    _ = try splitInto(core, input, &cur_y1, &cur_y2);
+
+    var fl: usize = 0;
+    while (fl < layer_count) : (fl += 1) try core.layers[fl].forwardInPlace(&cur_y1, &cur_y2);
 
     var cur_dy1 = try Tensor.init(allocator, &.{ batch_size, core.dim });
     defer cur_dy1.deinit();
@@ -1158,8 +1157,12 @@ fn syncAllLayersGPU(core: *RSFCore) !void {
 
     try ensureFiniteSlice(layer.s_weight.data);
     try ensureFiniteSlice(layer.t_weight.data);
+    try ensureFiniteSlice(layer.s_bias.data);
+    try ensureFiniteSlice(layer.t_bias.data);
     try validateF16Convertible(layer.s_weight.data);
     try validateF16Convertible(layer.t_weight.data);
+    try validateF16Convertible(layer.s_bias.data);
+    try validateF16Convertible(layer.t_bias.data);
 
     var local_f16 = try core.allocator.alloc(f16, dim_sq);
     errdefer core.allocator.free(local_f16);
@@ -1174,6 +1177,19 @@ fn syncAllLayersGPU(core: *RSFCore) !void {
     i = 0;
     while (i < dim_sq) : (i += 1) local_f16[i] = @floatCast(layer.t_weight.data[i]);
     try staged_accel.setWeightsT(local_f16, core.dim, core.dim);
+
+    var bias_f16 = try core.allocator.alloc(f16, core.dim);
+    defer core.allocator.free(bias_f16);
+
+    i = 0;
+    while (i < core.dim) : (i += 1) bias_f16[i] = @floatCast(layer.s_bias.data[i]);
+    try staged_accel.setSBias(bias_f16, core.dim);
+
+    i = 0;
+    while (i < core.dim) : (i += 1) bias_f16[i] = @floatCast(layer.t_bias.data[i]);
+    try staged_accel.setTBias(bias_f16, core.dim);
+
+    try staged_accel.setClipRange(@floatCast(layer.clip_min), @floatCast(layer.clip_max));
 
     if (core.gpu_accel) |*ga| ga.deinit();
     if (core.f16_buf) |buf| core.allocator.free(buf);
